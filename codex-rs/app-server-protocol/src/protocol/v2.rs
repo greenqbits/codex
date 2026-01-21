@@ -1202,9 +1202,12 @@ pub struct ThreadListParams {
     pub limit: Option<u32>,
     /// Optional sort key; defaults to created_at.
     pub sort_key: Option<ThreadSortKey>,
-    /// Optional provider filter; when set, only sessions recorded under these
+    /// Optional provider filter; when set, only threads recorded under these
     /// providers are returned. When present but empty, includes all providers.
     pub model_providers: Option<Vec<String>>,
+    /// Optional archived filter; when set to true, only archived threads are returned.
+    /// If false or null, only non-archived threads are returned.
+    pub archived: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, JsonSchema, TS)]
