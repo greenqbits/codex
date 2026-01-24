@@ -1,3 +1,4 @@
+use codex_core::config::Config;
 use codex_core::models_manager::manager::ModelsManager;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
@@ -10,20 +11,26 @@ fn is_tui_mode(kind: ModeKind) -> bool {
     matches!(kind, ModeKind::Plan | ModeKind::Code)
 }
 
-fn filtered_presets(models_manager: &ModelsManager) -> Vec<CollaborationMode> {
+fn filtered_presets(models_manager: &ModelsManager, config: &Config) -> Vec<CollaborationMode> {
     models_manager
-        .list_collaboration_modes()
+        .list_collaboration_modes(config)
         .into_iter()
         .filter(|preset| is_tui_mode(mode_kind(preset)))
         .collect()
 }
 
-pub(crate) fn presets_for_tui(models_manager: &ModelsManager) -> Vec<CollaborationMode> {
-    filtered_presets(models_manager)
+pub(crate) fn presets_for_tui(
+    models_manager: &ModelsManager,
+    config: &Config,
+) -> Vec<CollaborationMode> {
+    filtered_presets(models_manager, config)
 }
 
-pub(crate) fn default_mode(models_manager: &ModelsManager) -> Option<CollaborationMode> {
-    let presets = filtered_presets(models_manager);
+pub(crate) fn default_mode(
+    models_manager: &ModelsManager,
+    config: &Config,
+) -> Option<CollaborationMode> {
+    let presets = models_manager.list_collaboration_modes(config);
     presets
         .iter()
         .find(|preset| preset.mode == ModeKind::Code)
@@ -33,12 +40,10 @@ pub(crate) fn default_mode(models_manager: &ModelsManager) -> Option<Collaborati
 
 pub(crate) fn mode_for_kind(
     models_manager: &ModelsManager,
+    config: &Config,
     kind: ModeKind,
 ) -> Option<CollaborationMode> {
-    if !is_tui_mode(kind) {
-        return None;
-    }
-    let presets = filtered_presets(models_manager);
+    let presets = models_manager.list_collaboration_modes(config);
     presets.into_iter().find(|preset| mode_kind(preset) == kind)
 }
 
@@ -49,9 +54,10 @@ pub(crate) fn same_variant(a: &CollaborationMode, b: &CollaborationMode) -> bool
 /// Cycle to the next collaboration mode preset in list order.
 pub(crate) fn next_mode(
     models_manager: &ModelsManager,
+    config: &Config,
     current: &CollaborationMode,
 ) -> Option<CollaborationMode> {
-    let presets = filtered_presets(models_manager);
+    let presets = models_manager.list_collaboration_modes(config);
     if presets.is_empty() {
         return None;
     }
@@ -63,8 +69,12 @@ pub(crate) fn next_mode(
     presets.get(next_index).cloned()
 }
 
-pub(crate) fn code_mode(models_manager: &ModelsManager) -> Option<CollaborationMode> {
-    filtered_presets(models_manager)
+pub(crate) fn execute_mode(
+    models_manager: &ModelsManager,
+    config: &Config,
+) -> Option<CollaborationMode> {
+    models_manager
+        .list_collaboration_modes(config)
         .into_iter()
         .find(|preset| mode_kind(preset) == ModeKind::Code)
 }

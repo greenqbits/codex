@@ -780,25 +780,19 @@ async fn make_chatwidget_manual(
     let collaboration_modes_enabled = cfg.features.enabled(Feature::CollaborationModes);
     let reasoning_effort = None;
     let stored_collaboration_mode = if collaboration_modes_enabled {
-        collaboration_modes::default_mode(models_manager.as_ref()).unwrap_or_else(|| {
-            CollaborationMode {
-                mode: ModeKind::Custom,
-                settings: Settings {
-                    model: resolved_model.clone(),
-                    reasoning_effort,
-                    developer_instructions: None,
-                },
-            }
-        })
-    } else {
-        CollaborationMode {
-            mode: ModeKind::Custom,
-            settings: Settings {
+        collaboration_modes::default_mode(models_manager.as_ref(), &cfg).unwrap_or_else(|| {
+            CollaborationMode::Custom(Settings {
                 model: resolved_model.clone(),
                 reasoning_effort,
                 developer_instructions: None,
-            },
-        }
+            })
+        })
+    } else {
+        CollaborationMode::Custom(Settings {
+            model: resolved_model.clone(),
+            reasoning_effort,
+            developer_instructions: None,
+        })
     };
     let widget = ChatWidget {
         app_event_tx,
@@ -1223,9 +1217,10 @@ async fn submit_user_message_with_mode_sets_coding_collaboration_mode() {
     chat.thread_id = Some(ThreadId::new());
     chat.set_feature_enabled(Feature::CollaborationModes, true);
 
-    let code_mode = collaboration_modes::code_mode(chat.models_manager.as_ref())
-        .expect("expected code collaboration mode");
-    chat.submit_user_message_with_mode("Implement the plan.".to_string(), code_mode);
+    let execute_mode =
+        collaboration_modes::execute_mode(chat.models_manager.as_ref(), &chat.config)
+            .expect("expected execute collaboration mode");
+    chat.submit_user_message_with_mode("Implement the plan.".to_string(), execute_mode);
 
     match next_submit_op(&mut op_rx) {
         Op::UserTurn {

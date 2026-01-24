@@ -932,8 +932,9 @@ impl ChatWidget {
     }
 
     fn open_plan_implementation_prompt(&mut self) {
-        let code_mode = collaboration_modes::code_mode(self.models_manager.as_ref());
-        let (implement_actions, implement_disabled_reason) = match code_mode {
+        let execute_mode =
+            collaboration_modes::execute_mode(self.models_manager.as_ref(), &self.config);
+        let (implement_actions, implement_disabled_reason) = match execute_mode {
             Some(collaboration_mode) => {
                 let user_text = PLAN_IMPLEMENTATION_CODING_MESSAGE.to_string();
                 let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
@@ -1939,6 +1940,7 @@ impl ChatWidget {
         let stored_collaboration_mode = if config.features.enabled(Feature::CollaborationModes) {
             initial_collaboration_mode(
                 models_manager.as_ref(),
+                &config,
                 fallback_custom,
                 config.experimental_mode,
             )
@@ -2184,6 +2186,7 @@ impl ChatWidget {
         let stored_collaboration_mode = if config.features.enabled(Feature::CollaborationModes) {
             initial_collaboration_mode(
                 models_manager.as_ref(),
+                &config,
                 fallback_custom,
                 config.experimental_mode,
             )
@@ -3549,7 +3552,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn open_collaboration_modes_popup(&mut self) {
-        let presets = collaboration_modes::presets_for_tui(self.models_manager.as_ref());
+        let presets = self.models_manager.list_collaboration_modes(&self.config);
         if presets.is_empty() {
             self.add_info_message(
                 "No collaboration modes are available right now.".to_string(),
@@ -4553,6 +4556,7 @@ impl ChatWidget {
             self.stored_collaboration_mode = if enabled {
                 initial_collaboration_mode(
                     self.models_manager.as_ref(),
+                    &self.config,
                     fallback_custom,
                     self.config.experimental_mode,
                 )
@@ -4675,6 +4679,7 @@ impl ChatWidget {
 
         if let Some(next_mode) = collaboration_modes::next_mode(
             self.models_manager.as_ref(),
+            &self.config,
             &self.stored_collaboration_mode,
         ) {
             self.set_collaboration_mode(next_mode);
@@ -5308,6 +5313,7 @@ fn extract_first_bold(s: &str) -> Option<String> {
 
 fn initial_collaboration_mode(
     models_manager: &ModelsManager,
+    config: &Config,
     fallback_custom: Settings,
     desired_mode: Option<ModeKind>,
 ) -> CollaborationMode {
@@ -5318,15 +5324,13 @@ fn initial_collaboration_mode(
                 settings: fallback_custom,
             };
         }
-        if let Some(mode) = collaboration_modes::mode_for_kind(models_manager, kind) {
+        if let Some(mode) = collaboration_modes::mode_for_kind(models_manager, config, kind) {
             return mode;
         }
     }
 
-    collaboration_modes::default_mode(models_manager).unwrap_or(CollaborationMode {
-        mode: ModeKind::Custom,
-        settings: fallback_custom,
-    })
+    collaboration_modes::default_mode(models_manager, config)
+        .unwrap_or(CollaborationMode::Custom(fallback_custom))
 }
 
 async fn fetch_rate_limits(base_url: String, auth: CodexAuth) -> Option<RateLimitSnapshot> {
