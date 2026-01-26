@@ -36,6 +36,7 @@ pub struct CollaborationModeConfig {
 #[schemars(deny_unknown_fields)]
 pub struct CollaborationModesConfig {
     pub plan: Option<CollaborationModeConfig>,
+    pub code: Option<CollaborationModeConfig>,
     pub pair_programming: Option<CollaborationModeConfig>,
     pub execute: Option<CollaborationModeConfig>,
 }

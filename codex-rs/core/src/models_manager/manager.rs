@@ -15,6 +15,7 @@ use codex_api::ModelsClient;
 use codex_api::ReqwestTransport;
 use codex_app_server_protocol::AuthMode;
 use codex_protocol::config_types::CollaborationModeMask;
+use codex_protocol::config_types::ModeKind;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ModelsResponse;
@@ -91,8 +92,42 @@ impl ModelsManager {
     /// List collaboration mode presets.
     ///
     /// Returns a static set of presets seeded with the configured model.
-    pub fn list_collaboration_modes(&self) -> Vec<CollaborationModeMask> {
+    pub fn list_collaboration_modes(&self, config: &Config) -> Vec<CollaborationModeMask> {
+        let global_model = config.model.clone();
+        let global_effort = config.model_reasoning_effort;
+
         builtin_collaboration_mode_presets()
+            .into_iter()
+            .map(|mut preset| {
+                if let Some(model) = global_model.as_ref() {
+                    preset.model = Some(model.clone());
+                }
+                if let Some(effort) = global_effort {
+                    preset.reasoning_effort = Some(Some(effort));
+                }
+
+                let per_mode = match preset.mode {
+                    Some(ModeKind::Plan) => config.collaboration_modes.plan.as_ref(),
+                    Some(ModeKind::Code) => config.collaboration_modes.code.as_ref(),
+                    Some(ModeKind::PairProgramming) => {
+                        config.collaboration_modes.pair_programming.as_ref()
+                    }
+                    Some(ModeKind::Execute) => config.collaboration_modes.execute.as_ref(),
+                    Some(ModeKind::Custom) | None => None,
+                };
+
+                if let Some(per_mode) = per_mode {
+                    if let Some(model) = per_mode.model.as_ref() {
+                        preset.model = Some(model.clone());
+                    }
+                    if let Some(effort) = per_mode.model_reasoning_effort {
+                        preset.reasoning_effort = Some(Some(effort));
+                    }
+                }
+
+                preset
+            })
+            .collect()
     }
 
     /// Attempt to list models without blocking, using the current cached state.
@@ -362,10 +397,13 @@ mod tests {
     use crate::CodexAuth;
     use crate::auth::AuthCredentialsStoreMode;
     use crate::config::ConfigBuilder;
+    use crate::config::types::CollaborationModeConfig;
+    use crate::config::types::CollaborationModesConfig;
     use crate::features::Feature;
     use crate::model_provider_info::WireApi;
     use chrono::Utc;
     use codex_protocol::openai_models::ModelsResponse;
+    use codex_protocol::openai_models::ReasoningEffort;
     use core_test_support::responses::mount_models_once;
     use pretty_assertions::assert_eq;
     use serde_json::json;
@@ -718,5 +756,129 @@ mod tests {
             !response.models.is_empty(),
             "bundled models.json should contain at least one model"
         );
+    }
+
+    #[tokio::test]
+    async fn list_collaboration_modes_applies_global_overrides() {
+        let codex_home = tempdir().expect("temp dir");
+        let mut config = ConfigBuilder::default()
+            .codex_home(codex_home.path().to_path_buf())
+            .build()
+            .await
+            .expect("load default test config");
+
+        config.model = Some("gpt-5.2".to_string());
+        config.model_reasoning_effort = Some(ReasoningEffort::XHigh);
+        config.collaboration_modes = CollaborationModesConfig::default();
+
+        let auth_manager =
+            AuthManager::from_auth_for_testing(CodexAuth::from_api_key("Test API Key"));
+        let manager = ModelsManager::new(codex_home.path().to_path_buf(), auth_manager);
+
+        let masks = manager.list_collaboration_modes(&config);
+        assert!(
+            !masks.is_empty(),
+            "expected built-in collaboration mode presets"
+        );
+        for mask in masks {
+            assert_eq!(mask.model, Some("gpt-5.2".to_string()));
+            assert_eq!(mask.reasoning_effort, Some(Some(ReasoningEffort::XHigh)));
+        }
+    }
+
+    #[tokio::test]
+    async fn list_collaboration_modes_per_mode_overrides_take_precedence() {
+        let codex_home = tempdir().expect("temp dir");
+        let mut config = ConfigBuilder::default()
+            .codex_home(codex_home.path().to_path_buf())
+            .build()
+            .await
+            .expect("load default test config");
+
+        config.model = Some("gpt-5.2".to_string());
+        config.model_reasoning_effort = Some(ReasoningEffort::XHigh);
+        config.collaboration_modes = CollaborationModesConfig {
+            plan: Some(CollaborationModeConfig {
+                model: Some("plan-model".to_string()),
+                model_reasoning_effort: Some(ReasoningEffort::High),
+            }),
+            code: Some(CollaborationModeConfig {
+                model: Some("code-model".to_string()),
+                model_reasoning_effort: Some(ReasoningEffort::Medium),
+            }),
+            ..Default::default()
+        };
+
+        let auth_manager =
+            AuthManager::from_auth_for_testing(CodexAuth::from_api_key("Test API Key"));
+        let manager = ModelsManager::new(codex_home.path().to_path_buf(), auth_manager);
+
+        let masks = manager.list_collaboration_modes(&config);
+        let plan = masks
+            .iter()
+            .find(|m| m.mode == Some(ModeKind::Plan))
+            .expect("Plan mode present");
+        assert_eq!(plan.model, Some("plan-model".to_string()));
+        assert_eq!(plan.reasoning_effort, Some(Some(ReasoningEffort::High)));
+
+        let code = masks
+            .iter()
+            .find(|m| m.mode == Some(ModeKind::Code))
+            .expect("Code mode present");
+        assert_eq!(code.model, Some("code-model".to_string()));
+        assert_eq!(code.reasoning_effort, Some(Some(ReasoningEffort::Medium)));
+
+        let execute = masks
+            .iter()
+            .find(|m| m.mode == Some(ModeKind::Execute))
+            .expect("Execute mode present");
+        assert_eq!(execute.model, Some("gpt-5.2".to_string()));
+        assert_eq!(execute.reasoning_effort, Some(Some(ReasoningEffort::XHigh)));
+    }
+
+    #[tokio::test]
+    async fn list_collaboration_modes_per_mode_overrides_are_field_specific() {
+        let codex_home = tempdir().expect("temp dir");
+        let mut config = ConfigBuilder::default()
+            .codex_home(codex_home.path().to_path_buf())
+            .build()
+            .await
+            .expect("load default test config");
+
+        config.model = Some("gpt-5.2".to_string());
+        config.model_reasoning_effort = Some(ReasoningEffort::XHigh);
+        config.collaboration_modes = CollaborationModesConfig {
+            // Only override effort for plan; model should remain global.
+            plan: Some(CollaborationModeConfig {
+                model: None,
+                model_reasoning_effort: Some(ReasoningEffort::High),
+            }),
+            // Only override model for code; effort should remain global.
+            code: Some(CollaborationModeConfig {
+                model: Some("code-only-model".to_string()),
+                model_reasoning_effort: None,
+            }),
+            ..Default::default()
+        };
+
+        let auth_manager =
+            AuthManager::from_auth_for_testing(CodexAuth::from_api_key("Test API Key"));
+        let manager = ModelsManager::new(codex_home.path().to_path_buf(), auth_manager);
+
+        let masks = manager.list_collaboration_modes(&config);
+
+        let plan = masks
+            .iter()
+            .find(|m| m.mode == Some(ModeKind::Plan))
+            .expect("Plan mode present");
+        assert_eq!(plan.model, Some("gpt-5.2".to_string()));
+        assert_eq!(plan.reasoning_effort, Some(Some(ReasoningEffort::High)));
+
+        let code = masks
+            .iter()
+            .find(|m| m.mode == Some(ModeKind::Code))
+            .expect("Code mode present");
+        assert_eq!(code.model, Some("code-only-model".to_string()));
+        assert_eq!(code.reasoning_effort, Some(Some(ReasoningEffort::XHigh)));
     }
 }

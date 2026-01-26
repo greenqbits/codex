@@ -129,6 +129,9 @@
     "CollaborationModesConfig": {
       "additionalProperties": false,
       "properties": {
+        "code": {
+          "$ref": "#/definitions/CollaborationModeConfig"
+        },
         "execute": {
           "$ref": "#/definitions/CollaborationModeConfig"
         },

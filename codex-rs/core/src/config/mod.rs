@@ -282,7 +282,9 @@ pub struct Config {
     /// Responses API.
     pub model_reasoning_effort: Option<ReasoningEffort>,
 
-    /// Optional overrides for built-in collaboration mode presets.
+    /// Per-collaboration-mode overrides (Plan/Code/Pair Programming/Execute).
+    ///
+    /// These are applied on top of the built-in collaboration mode presets.
     pub collaboration_modes: CollaborationModesConfig,
 
     /// If not "none", the value to use for `reasoning.summary` when making a
@@ -985,6 +987,38 @@ impl From<ConfigToml> for UserSavedConfig {
     }
 }
 
+fn merge_collaboration_mode_config(
+    base: Option<CollaborationModeConfig>,
+    overlay: Option<CollaborationModeConfig>,
+) -> Option<CollaborationModeConfig> {
+    match (base, overlay) {
+        (None, None) => None,
+        (Some(base), None) => Some(base),
+        (None, Some(overlay)) => Some(overlay),
+        (Some(base), Some(overlay)) => Some(CollaborationModeConfig {
+            model: overlay.model.or(base.model),
+            model_reasoning_effort: overlay.model_reasoning_effort.or(base.model_reasoning_effort),
+        }),
+    }
+}
+
+fn merge_collaboration_modes_config(
+    cfg: Option<CollaborationModesConfig>,
+    profile: Option<CollaborationModesConfig>,
+) -> CollaborationModesConfig {
+    let cfg = cfg.unwrap_or_default();
+    let profile = profile.unwrap_or_default();
+    CollaborationModesConfig {
+        plan: merge_collaboration_mode_config(cfg.plan, profile.plan),
+        code: merge_collaboration_mode_config(cfg.code, profile.code),
+        pair_programming: merge_collaboration_mode_config(
+            cfg.pair_programming,
+            profile.pair_programming,
+        ),
+        execute: merge_collaboration_mode_config(cfg.execute, profile.execute),
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ProjectConfig {
@@ -1197,48 +1231,6 @@ pub fn resolve_oss_provider(
         } else {
             config_toml.oss_provider.clone()
         }
-    }
-}
-
-fn merge_collaboration_mode_config(
-    base: Option<CollaborationModeConfig>,
-    overlay: Option<CollaborationModeConfig>,
-) -> Option<CollaborationModeConfig> {
-    match (base, overlay) {
-        (None, None) => None,
-        (Some(base), None) => Some(base),
-        (None, Some(overlay)) => Some(overlay),
-        (Some(base), Some(overlay)) => Some(CollaborationModeConfig {
-            model: overlay.model.or(base.model),
-            model_reasoning_effort: overlay
-                .model_reasoning_effort
-                .or(base.model_reasoning_effort),
-        }),
-    }
-}
-
-fn merge_collaboration_modes_config(
-    base: Option<CollaborationModesConfig>,
-    overlay: Option<CollaborationModesConfig>,
-) -> CollaborationModesConfig {
-    let CollaborationModesConfig {
-        plan: base_plan,
-        pair_programming: base_pair_programming,
-        execute: base_execute,
-    } = base.unwrap_or_default();
-    let CollaborationModesConfig {
-        plan: overlay_plan,
-        pair_programming: overlay_pair_programming,
-        execute: overlay_execute,
-    } = overlay.unwrap_or_default();
-
-    CollaborationModesConfig {
-        plan: merge_collaboration_mode_config(base_plan, overlay_plan),
-        pair_programming: merge_collaboration_mode_config(
-            base_pair_programming,
-            overlay_pair_programming,
-        ),
-        execute: merge_collaboration_mode_config(base_execute, overlay_execute),
     }
 }
 
