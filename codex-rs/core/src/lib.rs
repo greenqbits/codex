@@ -15,6 +15,7 @@ pub mod codex;
 mod codex_thread;
 mod compact_remote;
 pub use codex_thread::CodexThread;
+pub use codex_thread::ThreadConfigSnapshot;
 mod agent;
 mod codex_delegate;
 mod command_safety;
@@ -125,6 +126,7 @@ pub use safety::get_platform_sandbox;
 pub use safety::is_windows_elevated_sandbox_enabled;
 pub use safety::set_windows_elevated_sandbox_enabled;
 pub use safety::set_windows_sandbox_enabled;
+pub use tools::spec::parse_tool_input_schema;
 // Re-export the protocol types from the standalone `codex-protocol` crate so existing
 // `codex_core::protocol::...` references continue to work across the workspace.
 pub use codex_protocol::protocol;

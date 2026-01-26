@@ -38,6 +38,8 @@ use codex_protocol::approvals::ExecPolicyAmendment;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Settings;
 use codex_protocol::config_types::WebSearchMode;
+use codex_protocol::dynamic_tools::DynamicToolResponse;
+use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::items::TurnItem;
 use codex_protocol::items::UserMessageItem;
 use codex_protocol::models::BaseInstructions;
@@ -89,6 +91,7 @@ use crate::client::ModelClient;
 use crate::client::ModelClientSession;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
+use crate::codex_thread::ThreadConfigSnapshot;
 use crate::compact::collect_user_messages;
 use crate::config::Config;
 use crate::config::Constrained;
@@ -192,6 +195,7 @@ pub struct Codex {
     pub(crate) rx_event: Receiver<Event>,
     // Last known status of the agent.
     pub(crate) agent_status: watch::Receiver<AgentStatus>,
+    pub(crate) session: Arc<Session>,
 }
 
 /// Wrapper returned by [`Codex::spawn`] containing the spawned [`Codex`],
@@ -234,6 +238,7 @@ fn maybe_push_chat_wire_api_deprecation(
 
 impl Codex {
     /// Spawn a new [`Codex`] and initialize the session.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn spawn(
         config: Config,
         auth_manager: Arc<AuthManager>,
@@ -242,16 +247,12 @@ impl Codex {
         conversation_history: InitialHistory,
         session_source: SessionSource,
         agent_control: AgentControl,
+        dynamic_tools: Vec<DynamicToolSpec>,
     ) -> CodexResult<CodexSpawnOk> {
         let (tx_sub, rx_sub) = async_channel::bounded(SUBMISSION_CHANNEL_CAPACITY);
         let (tx_event, rx_event) = async_channel::unbounded();
 
         let loaded_skills = skills_manager.skills_for_config(&config);
-        // let loaded_skills = if config.features.enabled(Feature::Skills) {
-        //     Some(skills_manager.skills_for_config(&config))
-        // } else {
-        //     None
-        // };
 
         for err in &loaded_skills.errors {
             error!(
@@ -318,6 +319,7 @@ impl Codex {
             cwd: config.cwd.clone(),
             original_config_do_not_use: Arc::clone(&config),
             session_source,
+            dynamic_tools,
         };
 
         // Generate a unique ID for the lifetime of this Codex session.
@@ -345,12 +347,13 @@ impl Codex {
         let thread_id = session.conversation_id;
 
         // This task will run until Op::Shutdown is received.
-        tokio::spawn(submission_loop(session, config, rx_sub));
+        tokio::spawn(submission_loop(Arc::clone(&session), config, rx_sub));
         let codex = Codex {
             next_id: AtomicU64::new(0),
             tx_sub,
             rx_event,
             agent_status: agent_status_rx,
+            session,
         };
 
         #[allow(deprecated)]
@@ -394,6 +397,11 @@ impl Codex {
     pub(crate) async fn agent_status(&self) -> AgentStatus {
         self.agent_status.borrow().clone()
     }
+
+    pub(crate) async fn thread_config_snapshot(&self) -> ThreadConfigSnapshot {
+        let state = self.session.state.lock().await;
+        state.session_configuration.thread_config_snapshot()
+    }
 }
 
 /// Context for an initialized model agent
@@ -435,6 +443,7 @@ pub(crate) struct TurnContext {
     pub(crate) codex_linux_sandbox_exe: Option<PathBuf>,
     pub(crate) tool_call_gate: Arc<ReadinessFlag>,
     pub(crate) truncation_policy: TruncationPolicy,
+    pub(crate) dynamic_tools: Vec<DynamicToolSpec>,
 }
 
 impl TurnContext {
@@ -492,9 +501,23 @@ pub(crate) struct SessionConfiguration {
     original_config_do_not_use: Arc<Config>,
     /// Source of the session (cli, vscode, exec, mcp, ...)
     session_source: SessionSource,
+    dynamic_tools: Vec<DynamicToolSpec>,
 }
 
 impl SessionConfiguration {
+    fn thread_config_snapshot(&self) -> ThreadConfigSnapshot {
+        ThreadConfigSnapshot {
+            model: self.collaboration_mode.model().to_string(),
+            model_provider_id: self.original_config_do_not_use.model_provider_id.clone(),
+            approval_policy: self.approval_policy.value(),
+            sandbox_policy: self.sandbox_policy.get().clone(),
+            cwd: self.cwd.clone(),
+            reasoning_effort: self.collaboration_mode.reasoning_effort(),
+            personality: self.personality,
+            session_source: self.session_source.clone(),
+        }
+    }
+
     pub(crate) fn apply(&self, updates: &SessionSettingsUpdate) -> ConstraintResult<Self> {
         let mut next_configuration = self.clone();
         if let Some(collaboration_mode) = updates.collaboration_mode.clone() {
@@ -595,6 +618,7 @@ impl Session {
             codex_linux_sandbox_exe: per_turn_config.codex_linux_sandbox_exe.clone(),
             tool_call_gate: Arc::new(ReadinessFlag::new()),
             truncation_policy: model_info.truncation_policy.into(),
+            dynamic_tools: session_configuration.dynamic_tools.clone(),
         }
     }
 
@@ -652,7 +676,15 @@ impl Session {
         // - initialize RolloutRecorder with new or resumed session info
         // - perform default shell discovery
         // - load history metadata
-        let rollout_fut = RolloutRecorder::new(&config, rollout_params);
+        let rollout_fut = async {
+            if config.ephemeral {
+                Ok(None)
+            } else {
+                RolloutRecorder::new(&config, rollout_params)
+                    .await
+                    .map(Some)
+            }
+        };
 
         let history_meta_fut = crate::message_history::history_metadata(&config);
         let auth_manager_clone = Arc::clone(&auth_manager);
@@ -679,7 +711,9 @@ impl Session {
             error!("failed to initialize rollout recorder: {e:#}");
             anyhow::Error::from(e)
         })?;
-        let rollout_path = rollout_recorder.rollout_path.clone();
+        let rollout_path = rollout_recorder
+            .as_ref()
+            .map(|rec| rec.rollout_path.clone());
 
         let mut post_session_configured_events = Vec::<Event>::new();
 
@@ -768,7 +802,7 @@ impl Session {
             mcp_startup_cancellation_token: Mutex::new(CancellationToken::new()),
             unified_exec_manager: UnifiedExecProcessManager::default(),
             notifier: UserNotifier::new(config.notify.clone()),
-            rollout: Mutex::new(Some(rollout_recorder)),
+            rollout: Mutex::new(rollout_recorder),
             user_shell: Arc::new(default_shell),
             show_raw_agent_reasoning: config.show_raw_agent_reasoning,
             exec_policy,
@@ -1464,6 +1498,27 @@ impl Session {
         }
     }
 
+    pub async fn notify_dynamic_tool_response(&self, call_id: &str, response: DynamicToolResponse) {
+        let entry = {
+            let mut active = self.active_turn.lock().await;
+            match active.as_mut() {
+                Some(at) => {
+                    let mut ts = at.turn_state.lock().await;
+                    ts.remove_pending_dynamic_tool(call_id)
+                }
+                None => None,
+            }
+        };
+        match entry {
+            Some(tx_response) => {
+                tx_response.send(response).ok();
+            }
+            None => {
+                warn!("No pending dynamic tool call found for call_id: {call_id}");
+            }
+        }
+    }
+
     pub async fn notify_approval(&self, sub_id: &str, decision: ReviewDecision) {
         let entry = {
             let mut active = self.active_turn.lock().await;
@@ -2125,6 +2180,9 @@ async fn submission_loop(sess: Arc<Session>, config: Arc<Config>, rx_sub: Receiv
             Op::UserInputAnswer { id, response } => {
                 handlers::request_user_input_response(&sess, id, response).await;
             }
+            Op::DynamicToolResponse { id, response } => {
+                handlers::dynamic_tool_response(&sess, id, response).await;
+            }
             Op::AddToHistory { text } => {
                 handlers::add_to_history(&sess, &config, text).await;
             }
@@ -2221,6 +2279,7 @@ mod handlers {
     use codex_protocol::config_types::CollaborationMode;
     use codex_protocol::config_types::ModeKind;
     use codex_protocol::config_types::Settings;
+    use codex_protocol::dynamic_tools::DynamicToolResponse;
     use codex_protocol::user_input::UserInput;
     use codex_rmcp_client::ElicitationAction;
     use codex_rmcp_client::ElicitationResponse;
@@ -2456,6 +2515,14 @@ mod handlers {
         response: RequestUserInputResponse,
     ) {
         sess.notify_user_input_response(&id, response).await;
+    }
+
+    pub async fn dynamic_tool_response(
+        sess: &Arc<Session>,
+        id: String,
+        response: DynamicToolResponse,
+    ) {
+        sess.notify_dynamic_tool_response(&id, response).await;
     }
 
     pub async fn add_to_history(sess: &Arc<Session>, config: &Arc<Config>, text: String) {
@@ -2795,6 +2862,7 @@ async fn spawn_review_thread(
         final_output_json_schema: None,
         codex_linux_sandbox_exe: parent_turn_context.codex_linux_sandbox_exe.clone(),
         tool_call_gate: Arc::new(ReadinessFlag::new()),
+        dynamic_tools: parent_turn_context.dynamic_tools.clone(),
         truncation_policy: model_info.truncation_policy.into(),
     };
 
@@ -3131,6 +3199,7 @@ async fn run_sampling_request(
                 .map(|(name, tool)| (name, tool.tool))
                 .collect(),
         ),
+        turn_context.dynamic_tools.as_slice(),
     ));
 
     let model_supports_parallel = turn_context
@@ -3911,6 +3980,7 @@ mod tests {
             cwd: config.cwd.clone(),
             original_config_do_not_use: Arc::clone(&config),
             session_source: SessionSource::Exec,
+            dynamic_tools: Vec::new(),
         };
 
         let mut state = SessionState::new(session_configuration);
@@ -3990,6 +4060,7 @@ mod tests {
             cwd: config.cwd.clone(),
             original_config_do_not_use: Arc::clone(&config),
             session_source: SessionSource::Exec,
+            dynamic_tools: Vec::new(),
         };
 
         let mut state = SessionState::new(session_configuration);
@@ -4253,6 +4324,7 @@ mod tests {
             cwd: config.cwd.clone(),
             original_config_do_not_use: Arc::clone(&config),
             session_source: SessionSource::Exec,
+            dynamic_tools: Vec::new(),
         };
         let per_turn_config = Session::build_per_turn_config(&session_configuration);
         let model_info = ModelsManager::construct_model_info_offline(
@@ -4361,6 +4433,7 @@ mod tests {
             cwd: config.cwd.clone(),
             original_config_do_not_use: Arc::clone(&config),
             session_source: SessionSource::Exec,
+            dynamic_tools: Vec::new(),
         };
         let per_turn_config = Session::build_per_turn_config(&session_configuration);
         let model_info = ModelsManager::construct_model_info_offline(
@@ -4681,6 +4754,7 @@ mod tests {
                     .map(|(name, tool)| (name, tool.tool))
                     .collect(),
             ),
+            turn_context.dynamic_tools.as_slice(),
         );
         let item = ResponseItem::CustomToolCall {
             id: None,
