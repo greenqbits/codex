@@ -68,6 +68,20 @@ model_reasoning_effort = "xhigh"
 Config file path:
 - `/home/idurando/.codex/config.toml`
 
+## Desktop integration (hl1 / XFCE)
+
+Menu entry:
+- `/home/idurando/.local/share/applications/greenqbits-codex.desktop` (Name: `Codex`)
+
+Launcher wrapper:
+- `/home/idurando/.local/bin/greenqbits-codex` (execs `~/.local/bin/codex`)
+
+Desktop shortcut:
+- `/home/idurando/Desktop/Codex.desktop`
+
+Icon:
+- `greenqbits-codex` (ChatGPT icon; installed under `~/.local/share/icons/hicolor/*/apps/greenqbits-codex.png` and `~/.local/share/icons/hicolor/scalable/apps/greenqbits-codex.svg`)
+
 ## Build (Arch Linux)
 
 Build:
@@ -91,4 +105,3 @@ cd codex-rs
 cargo check
 cargo test -p codex-core list_collaboration_modes_ -- --nocapture
 ```
-
