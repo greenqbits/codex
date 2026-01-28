@@ -90,7 +90,15 @@ Desktop shortcut:
 - `/home/idurando/Desktop/Codex.desktop`
 
 Icon:
-- `greenqbits-codex` (ChatGPT icon; installed under `~/.local/share/icons/hicolor/*/apps/greenqbits-codex.png` and `~/.local/share/icons/hicolor/scalable/apps/greenqbits-codex.svg`)
+- ChatGPT icon (installed under `~/.local/share/icons/hicolor/*/apps/greenqbits-codex.png` and `~/.local/share/icons/hicolor/scalable/apps/greenqbits-codex.svg`)
+- `.desktop` uses an absolute icon path to avoid theme/caching issues:
+  - `/home/idurando/.local/share/icons/hicolor/256x256/apps/greenqbits-codex.png`
+
+Reinstall/refresh desktop integration:
+
+```bash
+bash /home/idurando/.codex/skills/greenqbits-codex-sync/scripts/codex_desktop_install.sh
+```
 
 ## Build (Arch Linux)
 
