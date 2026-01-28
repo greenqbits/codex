@@ -222,6 +222,9 @@
             "remote_models": {
               "type": "boolean"
             },
+            "request_rule": {
+              "type": "boolean"
+            },
             "responses_websockets": {
               "type": "boolean"
             },
@@ -229,6 +232,9 @@
               "type": "boolean"
             },
             "shell_tool": {
+              "type": "boolean"
+            },
+            "skill_mcp_dependency_install": {
               "type": "boolean"
             },
             "steer": {
@@ -474,7 +480,6 @@
       "type": "object"
     },
     "Notice": {
-      "additionalProperties": false,
       "description": "Settings for notices we display to users via the tui and app-server clients (primarily the Codex IDE extension). NOTE: these are different from notifications - notices are warnings, NUX screens, acknowledgements, etc.",
       "properties": {
         "hide_full_access_warning": {
@@ -782,6 +787,13 @@
             "type": "string"
           },
           "type": "object"
+        },
+        "scopes": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "startup_timeout_ms": {
           "default": null,
@@ -1211,6 +1223,9 @@
         "remote_models": {
           "type": "boolean"
         },
+        "request_rule": {
+          "type": "boolean"
+        },
         "responses_websockets": {
           "type": "boolean"
         },
@@ -1218,6 +1233,9 @@
           "type": "boolean"
         },
         "shell_tool": {
+          "type": "boolean"
+        },
+        "skill_mcp_dependency_install": {
           "type": "boolean"
         },
         "steer": {
@@ -1493,6 +1511,10 @@
         }
       ],
       "description": "User-level skill config entries keyed by SKILL.md path."
+    },
+    "suppress_unstable_features_warning": {
+      "description": "Suppress warnings about unstable (under development) features.",
+      "type": "boolean"
     },
     "tool_output_token_limit": {
       "description": "Token budget applied when storing tool/function outputs in the context manager.",
