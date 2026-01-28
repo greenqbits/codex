@@ -148,12 +148,30 @@ fn session_summary(token_usage: TokenUsage, thread_id: Option<ThreadId>) -> Opti
 }
 
 fn errors_for_cwd(cwd: &Path, response: &ListSkillsResponseEvent) -> Vec<SkillErrorInfo> {
-    response
+    if let Some(entry) = response
         .skills
         .iter()
         .find(|entry| entry.cwd.as_path() == cwd)
-        .map(|entry| entry.errors.clone())
-        .unwrap_or_default()
+    {
+        return entry.errors.clone();
+    }
+
+    let cwd_canon = dunce::canonicalize(cwd).ok();
+    if let Some(cwd_canon) = cwd_canon {
+        if let Some(entry) = response.skills.iter().find(|entry| {
+            dunce::canonicalize(&entry.cwd)
+                .ok()
+                .is_some_and(|entry_canon| entry_canon == cwd_canon)
+        }) {
+            return entry.errors.clone();
+        }
+    }
+
+    if response.skills.len() == 1 {
+        return response.skills[0].errors.clone();
+    }
+
+    Vec::new()
 }
 
 fn emit_skill_load_warnings(app_event_tx: &AppEventSender, errors: &[SkillErrorInfo]) {

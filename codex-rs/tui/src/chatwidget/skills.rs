@@ -142,11 +142,31 @@ impl ChatWidget {
 }
 
 fn skills_for_cwd(cwd: &Path, skills_entries: &[SkillsListEntry]) -> Vec<ProtocolSkillMetadata> {
-    skills_entries
-        .iter()
-        .find(|entry| entry.cwd.as_path() == cwd)
-        .map(|entry| entry.skills.clone())
-        .unwrap_or_default()
+    // Primary key is the session/root cwd; in most cases this matches the TUI config cwd.
+    if let Some(entry) = skills_entries.iter().find(|entry| entry.cwd.as_path() == cwd) {
+        return entry.skills.clone();
+    }
+
+    // Best-effort match for cases where the client and server disagree on path formatting
+    // (e.g. symlinks, resume-in-different-dir, etc.).
+    let cwd_canon = dunce::canonicalize(cwd).ok();
+    if let Some(cwd_canon) = cwd_canon {
+        if let Some(entry) = skills_entries.iter().find(|entry| {
+            dunce::canonicalize(&entry.cwd)
+                .ok()
+                .is_some_and(|entry_canon| entry_canon == cwd_canon)
+        }) {
+            return entry.skills.clone();
+        }
+    }
+
+    // `Op::ListSkills` without explicit cwds returns a single entry for the session cwd.
+    // Use it even if the caller's `cwd` doesn't match (common when resuming a session).
+    if skills_entries.len() == 1 {
+        return skills_entries[0].skills.clone();
+    }
+
+    Vec::new()
 }
 
 fn enabled_skills_for_mentions(skills: &[ProtocolSkillMetadata]) -> Vec<SkillMetadata> {
@@ -210,4 +230,36 @@ pub(crate) fn find_skill_mentions(text: &str, skills: &[SkillMetadata]) -> Vec<S
 
 fn normalize_skill_config_path(path: &Path) -> PathBuf {
     dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codex_core::protocol::SkillScope;
+
+    fn mk_skill(name: &str) -> ProtocolSkillMetadata {
+        ProtocolSkillMetadata {
+            name: name.to_string(),
+            description: "desc".to_string(),
+            short_description: None,
+            interface: None,
+            dependencies: None,
+            path: PathBuf::from("/tmp/skill/SKILL.md"),
+            scope: SkillScope::User,
+            enabled: true,
+        }
+    }
+
+    #[test]
+    fn skills_for_cwd_falls_back_to_single_entry_on_mismatch() {
+        let entry = SkillsListEntry {
+            cwd: PathBuf::from("/tmp/session-cwd"),
+            skills: vec![mk_skill("parcifal-sync")],
+            errors: Vec::new(),
+        };
+
+        let out = skills_for_cwd(Path::new("/tmp/ui-cwd"), &[entry]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].name, "parcifal-sync");
+    }
 }
