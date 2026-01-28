@@ -90,7 +90,10 @@ Desktop shortcut:
 - `/home/idurando/Desktop/Codex.desktop`
 
 Icon:
-- ChatGPT icon (installed under `~/.local/share/icons/hicolor/*/apps/greenqbits-codex.png` and `~/.local/share/icons/hicolor/scalable/apps/greenqbits-codex.svg`)
+- High-contrast ChatGPT icon (green background + white mark) to stay visible on XFCE desktop backgrounds.
+- Installed under:
+  - `~/.local/share/icons/hicolor/*/apps/greenqbits-codex.png`
+  - `~/.local/share/icons/hicolor/scalable/apps/greenqbits-codex.svg`
 - `.desktop` uses an absolute icon path to avoid theme/caching issues:
   - `/home/idurando/.local/share/icons/hicolor/256x256/apps/greenqbits-codex.png`
 
