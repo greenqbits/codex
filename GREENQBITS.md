@@ -68,6 +68,16 @@ model_reasoning_effort = "xhigh"
 Config file path:
 - `/home/idurando/.codex/config.toml`
 
+## Skills (Codex TUI)
+
+Skill roots:
+- User/global: `$CODEX_HOME/skills` (hl1: `/home/idurando/.codex/skills`)
+- Repo-scoped (optional): `<repo>/.codex/skills`
+
+TUI usage:
+- List/manage: type `/skills`
+- Invoke: mention `$<skill-name>` in your prompt (example: `$parcifal-sync`)
+
 ## Desktop integration (hl1 / XFCE)
 
 Menu entry:
