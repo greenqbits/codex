@@ -2845,7 +2845,9 @@ impl ChatWidget {
                     );
                     return;
                 }
-                if let Some(mask) = collaboration_modes::plan_mask(self.models_manager.as_ref()) {
+                if let Some(mask) =
+                    collaboration_modes::plan_mask(self.models_manager.as_ref(), &self.config)
+                {
                     self.set_collaboration_mask(mask);
                 } else {
                     self.add_info_message("Plan mode unavailable right now.".to_string(), None);
