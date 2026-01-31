@@ -71,3 +71,7 @@ pub(crate) fn code_mask(
 ) -> Option<CollaborationModeMask> {
     mask_for_kind(models_manager, config, ModeKind::Code)
 }
+
+pub(crate) fn plan_mask(models_manager: &ModelsManager) -> Option<CollaborationModeMask> {
+    mask_for_kind(models_manager, ModeKind::Plan)
+}

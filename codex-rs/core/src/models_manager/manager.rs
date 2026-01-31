@@ -2,6 +2,7 @@ use super::cache::ModelsCacheManager;
 use crate::api_bridge::auth_provider_from_auth;
 use crate::api_bridge::map_api_error;
 use crate::auth::AuthManager;
+use crate::auth::AuthMode;
 use crate::config::Config;
 use crate::default_client::build_reqwest_client;
 use crate::error::CodexErr;
@@ -13,7 +14,6 @@ use crate::models_manager::model_info;
 use crate::models_manager::model_presets::builtin_model_presets;
 use codex_api::ModelsClient;
 use codex_api::ReqwestTransport;
-use codex_app_server_protocol::AuthMode;
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::openai_models::ModelInfo;
@@ -62,7 +62,7 @@ impl ModelsManager {
         let cache_path = codex_home.join(MODEL_CACHE_FILE);
         let cache_manager = ModelsCacheManager::new(cache_path, DEFAULT_MODEL_CACHE_TTL);
         Self {
-            local_models: builtin_model_presets(auth_manager.get_auth_mode()),
+            local_models: builtin_model_presets(auth_manager.get_internal_auth_mode()),
             remote_models: RwLock::new(Self::load_remote_models_from_file().unwrap_or_default()),
             auth_manager,
             etag: RwLock::new(None),
@@ -210,7 +210,7 @@ impl ModelsManager {
         refresh_strategy: RefreshStrategy,
     ) -> CoreResult<()> {
         if !config.features.enabled(Feature::RemoteModels)
-            || self.auth_manager.get_auth_mode() == Some(AuthMode::ApiKey)
+            || self.auth_manager.get_internal_auth_mode() == Some(AuthMode::ApiKey)
         {
             return Ok(());
         }
@@ -239,7 +239,8 @@ impl ModelsManager {
         let _timer =
             codex_otel::start_global_timer("codex.remote_models.fetch_update.duration_ms", &[]);
         let auth = self.auth_manager.auth().await;
-        let api_provider = self.provider.to_api_provider(Some(AuthMode::ChatGPT))?;
+        let auth_mode = self.auth_manager.get_internal_auth_mode();
+        let api_provider = self.provider.to_api_provider(auth_mode)?;
         let api_auth = auth_provider_from_auth(auth.clone(), &self.provider)?;
         let transport = ReqwestTransport::new(build_reqwest_client());
         let client = ModelsClient::new(transport, api_provider, api_auth);
@@ -306,7 +307,10 @@ impl ModelsManager {
         let remote_presets: Vec<ModelPreset> = remote_models.into_iter().map(Into::into).collect();
         let existing_presets = self.local_models.clone();
         let mut merged_presets = ModelPreset::merge(remote_presets, existing_presets);
-        let chatgpt_mode = self.auth_manager.get_auth_mode() == Some(AuthMode::ChatGPT);
+        let chatgpt_mode = matches!(
+            self.auth_manager.get_internal_auth_mode(),
+            Some(AuthMode::Chatgpt)
+        );
         merged_presets = ModelPreset::filter_by_auth(merged_presets, chatgpt_mode);
 
         for preset in &mut merged_presets {
@@ -350,7 +354,7 @@ impl ModelsManager {
         let cache_path = codex_home.join(MODEL_CACHE_FILE);
         let cache_manager = ModelsCacheManager::new(cache_path, DEFAULT_MODEL_CACHE_TTL);
         Self {
-            local_models: builtin_model_presets(auth_manager.get_auth_mode()),
+            local_models: builtin_model_presets(auth_manager.get_internal_auth_mode()),
             remote_models: RwLock::new(Self::load_remote_models_from_file().unwrap_or_default()),
             auth_manager,
             etag: RwLock::new(None),
@@ -470,6 +474,7 @@ mod tests {
             stream_max_retries: Some(0),
             stream_idle_timeout_ms: Some(5_000),
             requires_openai_auth: false,
+            supports_websockets: false,
         }
     }
 
