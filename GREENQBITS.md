@@ -10,6 +10,18 @@ Git remotes:
 - `upstream` (fetch): `https://github.com/openai/codex.git`
 - Upstream push is intentionally disabled (`upstream` push URL is a sentinel string).
 
+## GitHub push email (GH007)
+
+If GitHub rejects a push with:
+- `GH007: Your push would publish a private email address`
+
+Fix by setting the repo-local identity to your GitHub no-reply email:
+
+```bash
+git config user.name "Ignacio Miguel Durando"
+git config user.email "17954496+celerafx@users.noreply.github.com"
+```
+
 ## Upstream sync (merge-based)
 
 Update local + push to `origin`:
